@@ -15,6 +15,7 @@ class Nota extends Model
     protected $fillable = [
         'carne',
         'id_curso',
+        'id_sede',
         'consolidado',
         'fecha_aprobacion',
     ];

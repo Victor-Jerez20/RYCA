@@ -5,18 +5,32 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Smalot\PdfParser\Parser;
 use App\Models\Nota;
+use App\Models\Carrera;
+use App\Models\Sede;
 
 
 class ActaNotasController extends Controller
 {
     public function formulario()
     {
-        return view('acta.formulario');
+        $carreras = Carrera::all();
+        $sedes = Sede::all();
+        return view('acta.formulario', compact('carreras', 'sedes'));
     }
 
     public function procesar(Request $request)
     {
         $request->validate(['pdf' => 'required|mimes:pdf']);
+
+        $carreraSeleccionada = $request->input('carrera');
+        $cicloSeleccionado = $request->input('ciclo');
+        $sedeSeleccionada = $request->input('sede');
+
+        session([
+            'carrera_seleccionada' => $carreraSeleccionada,
+            'ciclo_seleccionado' => $cicloSeleccionado,
+            'sede_seleccionada' => $sedeSeleccionada
+        ]);
 
         $archivo = $request->file('pdf');
         $parser = new \Smalot\PdfParser\Parser();
@@ -107,6 +121,9 @@ class ActaNotasController extends Controller
 
     public function guardar(Request $request)
     {
+        //dump($request->input('cursos'));
+        //dd($request->input('cursos')[0]); // Muestra solo el primer curso para revisión
+
         $dataCursos = $request->input('cursos');
 
         if (!$dataCursos) {
@@ -115,7 +132,9 @@ class ActaNotasController extends Controller
 
         foreach ($dataCursos as $cursoInput) {
             $idCurso = $cursoInput['id_curso'];
+            $idSede = $cursoInput['id_sede'];
             $fechaAprobacion = $cursoInput['anio'] . '-' . $cursoInput['mes'];
+        
 
             if (!isset($cursoInput['estudiantes'])) continue;
 
@@ -123,6 +142,7 @@ class ActaNotasController extends Controller
                 \App\Models\Nota::create([
                     'carne' => $est['carne'],
                     'id_curso' => $idCurso,
+                    'id_sede' => $idSede,
                     'consolidado' => $est['consolidado'],
                     'fecha_aprobacion' => $fechaAprobacion,
                 ]);

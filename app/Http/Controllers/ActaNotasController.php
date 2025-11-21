@@ -50,7 +50,6 @@ class ActaNotasController extends Controller
             $codSedeHeader  = null;
             $estudiantes    = [];
 
-            // Encabezado del curso (solo lee datos del curso)
             foreach ($lineas as $i => $lineaCruda) {
                 $linea = trim($lineaCruda);
                 if ($linea === '') {
@@ -87,51 +86,57 @@ class ActaNotasController extends Controller
                 }
             }
 
-            // Estudiantes (Carné + Consolidado) en ESTA página
             foreach ($lineas as $lineaCruda) {
                 $linea = trim($lineaCruda);
                 if ($linea === '') {
                     continue;
                 }
 
-                // Buscar carné (7 u 8 dígitos)
+                // Carné de 7 u 8 dígitos
                 if (!preg_match('/\b(\d{7,8})\b/', $linea, $matchCarne)) {
                     continue;
                 }
 
                 $carne = $matchCarne[1];
 
-                // Números ANTES del carné = número(s) de fila -> hay que ignorarlos
-                $posCarne = strpos($linea, $carne);
+                // Números ANTES del carné = números de fila (1,2,3,...)
+                $posCarne    = strpos($linea, $carne);
                 $numerosFila = [];
                 if ($posCarne !== false && $posCarne > 0) {
                     $prefix = substr($linea, 0, $posCarne);
-                    preg_match_all('/\d{1,3}/', $prefix, $mFila);
-                    $numerosFila = $mFila[0] ?? [];
-                    $numerosFila = array_unique($numerosFila);
+                    if (preg_match_all('/\d{1,3}/', $prefix, $mFila)) {
+                        $numerosFila = array_values(array_unique($mFila[0]));
+                    }
                 }
 
-                // Borrar el carné de la línea para no sacar trozos 210 / 128 / 4
+                // Quitar el carné
                 $lineaSinCarne = str_replace($carne, str_repeat('X', strlen($carne)), $linea);
 
-                // Todos los números aislados de 1–3 dígitos
-                preg_match_all('/(?<!\d)(\d{1,3})(?!\d)/', $lineaSinCarne, $matches);
-                $tokens = $matches[1] ?? [];
+                // Reemplazar todo lo que no sea letra o número por espacio
+                $clean = preg_replace('/[^0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+/u', ' ', $lineaSinCarne);
+                $parts = preg_split('/\s+/', $clean, -1, PREG_SPLIT_NO_EMPTY);
 
-                // Eliminar cualquier número que coincida con los de fila
-                if (!empty($numerosFila) && !empty($tokens)) {
+                $nums = [];
+                foreach ($parts as $p) {
+                    // SOLO aceptamos tokens que sean SOLO números (sin letras)
+                    if (preg_match('/^\d{1,3}$/', $p)) {
+                        $nums[] = $p;
+                    }
+                }
+
+                // Quitar posibles números de fila
+                if (!empty($numerosFila) && !empty($nums)) {
                     $normFila = array_map(function ($n) {
                         return (string) ((int) $n);
                     }, $numerosFila);
 
-                    $tokens = array_filter($tokens, function ($t) use ($normFila) {
+                    $nums = array_values(array_filter($nums, function ($t) use ($normFila) {
                         return !in_array((string) ((int) $t), $normFila, true);
-                    });
-                    $tokens = array_values($tokens);
+                    }));
                 }
 
-                // Consolidado = último número válido; si no hay, 0
-                $consolidado = !empty($tokens) ? (int) end($tokens) : 0;
+                // Consolidado = último número puro; si no hay, 0
+                $consolidado = !empty($nums) ? (int) end($nums) : 0;
 
                 $estudiantes[] = [
                     'carne'       => $carne,
@@ -139,7 +144,6 @@ class ActaNotasController extends Controller
                 ];
             }
 
-            // Dejar solo un registro por carné (última aparición gana)
             $map = [];
             foreach ($estudiantes as $est) {
                 $c = $est['carne'] ?? null;

@@ -1,4 +1,4 @@
-<h2>Vista previa del acta</h2> 
+<h2>Vista previa del acta</h2>
 
 <form action="{{ route('acta.guardar') }}" method="POST">
     @csrf
@@ -71,11 +71,15 @@
                         <tr>
                             <td>
                                 {{ $est['carne'] }}
-                                <input type="hidden" name="cursos[{{ $loop->parent->index }}][estudiantes][{{ $idx }}][carne]" value="{{ $est['carne'] }}">
+                                <input type="hidden"
+                                    name="cursos[{{ $loop->parent->index }}][estudiantes][{{ $idx }}][carne]"
+                                    value="{{ $est['carne'] }}">
                             </td>
                             <td>
                                 {{ $est['consolidado'] }}
-                                <input type="hidden" name="cursos[{{ $loop->parent->index }}][estudiantes][{{ $idx }}][consolidado]" value="{{ $est['consolidado'] }}">
+                                <input type="hidden"
+                                    name="cursos[{{ $loop->parent->index }}][estudiantes][{{ $idx }}][consolidado]"
+                                    value="{{ $est['consolidado'] }}">
                             </td>
                         </tr>
                     @endforeach

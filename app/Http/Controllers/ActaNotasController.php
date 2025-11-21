@@ -8,13 +8,12 @@ use App\Models\Nota;
 use App\Models\Carrera;
 use App\Models\Sede;
 
-
 class ActaNotasController extends Controller
 {
     public function formulario()
     {
         $carreras = Carrera::all();
-        $sedes = Sede::all();
+        $sedes    = Sede::all();
         return view('acta.formulario', compact('carreras', 'sedes'));
     }
 
@@ -23,107 +22,161 @@ class ActaNotasController extends Controller
         $request->validate(['pdf' => 'required|mimes:pdf']);
 
         $carreraSeleccionada = $request->input('carrera');
-        $cicloSeleccionado = $request->input('ciclo');
-        $sedeSeleccionada = $request->input('sede');
+        $cicloSeleccionado   = $request->input('ciclo');
+        $sedeSeleccionada    = $request->input('sede');
 
         session([
             'carrera_seleccionada' => $carreraSeleccionada,
-            'ciclo_seleccionado' => $cicloSeleccionado,
-            'sede_seleccionada' => $sedeSeleccionada
+            'ciclo_seleccionado'   => $cicloSeleccionado,
+            'sede_seleccionada'    => $sedeSeleccionada,
         ]);
 
         $archivo = $request->file('pdf');
-        $parser = new \Smalot\PdfParser\Parser();
-        $pdf = $parser->parseFile($archivo->getRealPath());
-        $texto = $pdf->getText();
+        $parser  = new Parser();
+        $pdf     = $parser->parseFile($archivo->getRealPath());
 
-        $lineas = explode("\n", $texto);
+        $paginasCursos = [];
 
-        $cursos = [];
-        $cursoActual = null;
+        foreach ($pdf->getPages() as $pageIndex => $page) {
+            $textoPagina = $page->getText();
+            $lineas      = preg_split("/\r\n|\n|\r/", $textoPagina);
 
-        foreach ($lineas as $index => $linea) {
-            $linea = trim($linea);
+            $nombreCurso    = 'Curso sin nombre';
+            $anio           = null;
+            $semestre       = null;
+            $codigoCarrera  = null;
+            $codCurso       = null;
+            $seccion        = null;
+            $codSedeHeader  = null;
+            $estudiantes    = [];
 
-            // Detectar encabezado de curso
-            if (stripos($linea, 'Curso:') !== false) {
-                $nombreCurso = trim(substr($linea, strpos($linea, 'Curso:') + 6)) ?? 'Curso desconocido';
-
-                // Buscar metadatos en las siguientes líneas (hasta 5 líneas abajo)
-                $anio = null;
-                $semestre = null;
-                $codigoCarrera = null;
-                $sede = null;
-
-                for ($i = 1; $i <= 5; $i++) {
-                    $lineaSiguiente = $lineas[$index + $i] ?? '';
-
-                    if (!$anio && preg_match('/Afro:\s*(\d{4})/i', $lineaSiguiente, $mAnio)) {
-                        $anio = $mAnio[1];
-                    }
-
-                    if (!$semestre) {
-                        if (str_contains($lineaSiguiente, '1:E')) $semestre = 1;
-                        elseif (str_contains($lineaSiguiente, '2:I')) $semestre = 2;
-                    }
-
-                    if (!$codigoCarrera && preg_match('/cod\s*carrera:\s*(\d+)/i', $lineaSiguiente, $mCarrera)) {
-                        $codigoCarrera = $mCarrera[1];
-                    }
-
-                    if (!$sede && preg_match('/Cod\s* sede:\s*(\d+)/i', $lineaSiguiente, $mSede)) {
-                        $sede = $mSede[1];
-                    }
+            // Encabezado del curso (solo lee datos del curso)
+            foreach ($lineas as $i => $lineaCruda) {
+                $linea = trim($lineaCruda);
+                if ($linea === '') {
+                    continue;
                 }
 
-                $cursoActual = [
-                    'nombre' => $nombreCurso,
-                    'anio' => $anio ?? 'Desconocido',
-                    'semestre' => $semestre ?? null,
-                    'codigo_carrera' => $codigoCarrera ?? null,
-                    'sede' => $sede ?? null,
-                    'estudiantes' => [],
-                ];
+                if (stripos($linea, 'Curso:') !== false) {
+                    $nombreCurso = trim(substr($linea, strpos($linea, 'Curso:') + 6)) ?: 'Curso sin nombre';
 
-                $cursos[] = $cursoActual;
-                continue;
+                    for ($j = 1; $j <= 8; $j++) {
+                        $lineaSiguiente = $lineas[$i + $j] ?? '';
+
+                        if (!$anio && preg_match('/Año:\s*(\d{4})/i', $lineaSiguiente, $mAnio)) {
+                            $anio = $mAnio[1];
+                        }
+                        if (!$semestre && preg_match('/Semestre:\s*([12])/i', $lineaSiguiente, $mSem)) {
+                            $semestre = (int) $mSem[1];
+                        }
+                        if (!$codCurso && preg_match('/Cod[_ ]curso:\s*(\d+)/i', $lineaSiguiente, $mCod)) {
+                            $codCurso = $mCod[1];
+                        }
+                        if (!$codigoCarrera && preg_match('/Cod[_ ]Carrera:\s*(\d+)/i', $lineaSiguiente, $mCar)) {
+                            $codigoCarrera = $mCar[1];
+                        }
+                        if (!$seccion && preg_match('/Sección:\s*(\d+)/i', $lineaSiguiente, $mSec)) {
+                            $seccion = $mSec[1];
+                        }
+                        if (!$codSedeHeader && preg_match('/Cod[_ ]Sede:\s*(\d+)/i', $lineaSiguiente, $mSed)) {
+                            $codSedeHeader = $mSed[1];
+                        }
+                    }
+
+                    break;
+                }
             }
 
-            // Detectar líneas con carné precedido por número de orden
-            if (preg_match('/\b(\d{7})\b/', $linea, $matchCarne)) {
+            // Estudiantes (Carné + Consolidado) en ESTA página
+            foreach ($lineas as $lineaCruda) {
+                $linea = trim($lineaCruda);
+                if ($linea === '') {
+                    continue;
+                }
+
+                // Buscar carné (7 u 8 dígitos)
+                if (!preg_match('/\b(\d{7,8})\b/', $linea, $matchCarne)) {
+                    continue;
+                }
+
                 $carne = $matchCarne[1];
 
-                preg_match_all('/(NSP|SDE|\d{1,3})/', $linea, $matchesNumeros);
-                $valores = $matchesNumeros[1] ?? [];
-
-                if (count($valores) >= 1 && $cursoActual !== null) {
-                    $consolidado = end($valores);
-                    $consolidado = is_numeric($consolidado) ? (float) $consolidado : 0;
-
-                    $cursos[array_key_last($cursos)]['estudiantes'][] = [
-                        'carne' => $carne,
-                        'consolidado' => $consolidado,
-                    ];
+                // Números ANTES del carné = número(s) de fila -> hay que ignorarlos
+                $posCarne = strpos($linea, $carne);
+                $numerosFila = [];
+                if ($posCarne !== false && $posCarne > 0) {
+                    $prefix = substr($linea, 0, $posCarne);
+                    preg_match_all('/\d{1,3}/', $prefix, $mFila);
+                    $numerosFila = $mFila[0] ?? [];
+                    $numerosFila = array_unique($numerosFila);
                 }
+
+                // Borrar el carné de la línea para no sacar trozos 210 / 128 / 4
+                $lineaSinCarne = str_replace($carne, str_repeat('X', strlen($carne)), $linea);
+
+                // Todos los números aislados de 1–3 dígitos
+                preg_match_all('/(?<!\d)(\d{1,3})(?!\d)/', $lineaSinCarne, $matches);
+                $tokens = $matches[1] ?? [];
+
+                // Eliminar cualquier número que coincida con los de fila
+                if (!empty($numerosFila) && !empty($tokens)) {
+                    $normFila = array_map(function ($n) {
+                        return (string) ((int) $n);
+                    }, $numerosFila);
+
+                    $tokens = array_filter($tokens, function ($t) use ($normFila) {
+                        return !in_array((string) ((int) $t), $normFila, true);
+                    });
+                    $tokens = array_values($tokens);
+                }
+
+                // Consolidado = último número válido; si no hay, 0
+                $consolidado = !empty($tokens) ? (int) end($tokens) : 0;
+
+                $estudiantes[] = [
+                    'carne'       => $carne,
+                    'consolidado' => $consolidado,
+                ];
+            }
+
+            // Dejar solo un registro por carné (última aparición gana)
+            $map = [];
+            foreach ($estudiantes as $est) {
+                $c = $est['carne'] ?? null;
+                if (!$c) {
+                    continue;
+                }
+                $map[$c] = $est;
+            }
+            $estudiantes = array_values($map);
+
+            if (!empty($estudiantes)) {
+                $paginasCursos[] = [
+                    'nombre'         => $nombreCurso,
+                    'anio'           => $anio,
+                    'semestre'       => $semestre,
+                    'codigo_carrera' => $codigoCarrera,
+                    'cod_curso'      => $codCurso,
+                    'seccion'        => $seccion,
+                    'sede'           => $codSedeHeader,
+                    'estudiantes'    => $estudiantes,
+                ];
             }
         }
 
-        // Eliminar cursos vacíos
-        $cursos = array_filter($cursos, fn($c) => count($c['estudiantes']) > 0);
-
-        if (empty($cursos)) {
-            return response("No se encontraron cursos válidos.", 200);
+        if (empty($paginasCursos)) {
+            return response("No se encontraron cursos válidos en el PDF.", 200);
         }
 
+        $cursos = array_values($paginasCursos);
+
         session(['cursos_extraidos' => $cursos]);
+
         return view('acta.preview', compact('cursos'));
     }
 
     public function guardar(Request $request)
     {
-        //dump($request->input('cursos'));
-        //dd($request->input('cursos')[0]); // Muestra solo el primer curso para revisión
-
         $dataCursos = $request->input('cursos');
 
         if (!$dataCursos) {
@@ -131,19 +184,32 @@ class ActaNotasController extends Controller
         }
 
         foreach ($dataCursos as $cursoInput) {
-            $idCurso = $cursoInput['id_curso'];
-            $idSede = $cursoInput['id_sede'];
-            $fechaAprobacion = $cursoInput['anio'] . '-' . $cursoInput['mes'];
-        
+            $idCurso = $cursoInput['id_curso'] ?? null;
+            $idSede  = $cursoInput['id_sede'] ?? null;
+            $anio    = $cursoInput['anio'] ?? null;
+            $mes     = $cursoInput['mes'] ?? null;
 
-            if (!isset($cursoInput['estudiantes'])) continue;
+            if (!$idCurso || !$idSede || !$anio || !$mes) {
+                continue;
+            }
+
+            $fechaAprobacion = sprintf('%04d-%02d-01', (int) $anio, (int) $mes);
+
+            if (!isset($cursoInput['estudiantes']) || !is_array($cursoInput['estudiantes'])) {
+                continue;
+            }
 
             foreach ($cursoInput['estudiantes'] as $est) {
-                \App\Models\Nota::create([
-                    'carne' => $est['carne'],
-                    'id_curso' => $idCurso,
-                    'id_sede' => $idSede,
-                    'consolidado' => $est['consolidado'],
+                $consolidado = isset($est['consolidado']) ? (int) $est['consolidado'] : 0;
+
+                Nota::create([
+                    'carne'            => $est['carne'],
+                    'id_curso'         => $idCurso,
+                    'id_sede'          => $idSede,
+                    'fase_1'           => null,
+                    'fase_2'           => null,
+                    'fase_f'           => null,
+                    'consolidado'      => $consolidado,
                     'fecha_aprobacion' => $fechaAprobacion,
                 ]);
             }
@@ -151,5 +217,4 @@ class ActaNotasController extends Controller
 
         return redirect()->route('acta.formulario')->with('success', 'Notas guardadas correctamente.');
     }
-
 }

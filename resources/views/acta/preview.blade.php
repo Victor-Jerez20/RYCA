@@ -76,10 +76,13 @@
                                     value="{{ $est['carne'] }}">
                             </td>
                             <td>
-                                {{ $est['consolidado'] }}
-                                <input type="hidden"
+                                <input
+                                    type="number"
                                     name="cursos[{{ $loop->parent->index }}][estudiantes][{{ $idx }}][consolidado]"
-                                    value="{{ $est['consolidado'] }}">
+                                    value="{{ $est['consolidado'] }}"
+                                    min="0"
+                                    max="100"
+                                    class="nota-input">
                             </td>
                         </tr>
                     @endforeach
@@ -183,5 +186,34 @@
 
     .btn-regresar:hover {
         background-color: #5a6268;
+    }
+
+    .nota-input {
+        width: 80px;
+        padding: 4px 6px;
+        border: 1px solid #bfc3c9;
+        border-radius: 4px;
+        text-align: center;
+        font-size: 13px;
+        background-color: #ffffff;
+        box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+    }
+
+    .nota-input::-webkit-outer-spin-button,
+    .nota-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    .nota-input[type="number"] {
+        -moz-appearance: textfield;
+    }
+
+    .nota-input:focus {
+        outline: none;
+        border-color: #007bff;
+        box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+        background-color: #fdfefe;
     }
 </style>
